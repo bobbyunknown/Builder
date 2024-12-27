@@ -1,0 +1,115 @@
+name: Build LEDE
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Pilih Device Target'
+        required: true
+        default: 'x86_64'
+        type: choice
+        options:
+        - x86_64
+        - rockchip_rk3399
+  release:
+    types: [published]
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  TZ: Asia/Jakarta
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Initialize Environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+
+    - name: Persiapan Lingkungan
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo -E apt-get -qq update
+        sudo -E apt-get -y full-upgrade
+        sudo -E apt-get -y install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+        bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gettext gcc-multilib g++-multilib \
+        git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+        libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libncurses-dev libpython3-dev libreadline-dev \
+        libssl-dev libtool llvm lrzsz genisoimage msmtp ninja-build p7zip p7zip-full patch pkgconf python3 \
+        python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+        uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+
+    - name: Clone Kode Sumber
+      run: |
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH lede
+        cd lede
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Konfigurasi Build
+      run: |
+        cd lede
+        case ${{ github.event.inputs.device }} in
+          "x86_64")
+            cp $GITHUB_WORKSPACE/configs/x86_64.config .config
+            ;;
+          "rockchip_rk3399")
+            cp $GITHUB_WORKSPACE/configs/rk3399.config .config
+            ;;
+          *)
+            cp $GITHUB_WORKSPACE/.config .config
+            ;;
+        esac
+        make defconfig
+
+    - name: Download Dependencies
+      run: |
+        cd lede
+        make download
+
+    - name: Build
+      run: |
+        cd lede
+        make -j$(nproc) || make -j1 V=s
+
+    - name: Organize Files
+      run: |
+        cd lede/bin/targets/*/*
+        rm -rf packages
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Generate release tag
+      id: tag
+      run: |
+        echo "release_tag=${{ github.event.inputs.device }}-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        touch release.txt
+        echo "::set-output name=status::success"
+
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        files: lede/bin/targets/**/*
+        body: |
+          LEDE firmware build untuk ${{ github.event.inputs.device }}
+          Build pada ${{ steps.tag.outputs.release_tag }}
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: lede_firmware_${{ github.event.inputs.device }}_${{ env.FILE_DATE }}
+        path: lede/bin/targets/
