@@ -62,13 +62,13 @@ jobs:
         cd lede
         case ${{ github.event.inputs.device }} in
           "x86_64")
-            cp $GITHUB_WORKSPACE/configs/x86_64.config .config
+            cp $GITHUB_WORKSPACE/x86_64.config .config
             ;;
           "rockchip_rk3399")
-            cp $GITHUB_WORKSPACE/configs/rk3399.config .config
+            cp $GITHUB_WORKSPACE/rk3399.config .config
             ;;
           *)
-            cp $GITHUB_WORKSPACE/.config .config
+            cp $GITHUB_WORKSPACE/x86_64.config .config
             ;;
         esac
         make defconfig
